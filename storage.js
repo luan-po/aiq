@@ -65,7 +65,11 @@ const q = {
   bumpSeq: db.prepare('UPDATE groups SET last_seq = last_seq + 1 WHERE id = ?'),
   nextSeq: db.prepare('SELECT last_seq FROM groups WHERE id = ?'),
   insertMsg: db.prepare('INSERT INTO messages (group_id,seq,sender_id,kind,text,ts) VALUES (?,?,?,?,?,?)'),
-  history: db.prepare('SELECT * FROM messages WHERE group_id = ? AND seq > ? ORDER BY seq ASC LIMIT 500'),
+  history: db.prepare(`
+    SELECT m.*, COALESCE(u.name, m.sender_id) AS sender_name
+    FROM messages m LEFT JOIN users u ON u.id = m.sender_id
+    WHERE m.group_id = ? AND m.seq > ? ORDER BY m.seq ASC LIMIT 500
+  `),
   getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
   setSetting: db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value'),
 };
