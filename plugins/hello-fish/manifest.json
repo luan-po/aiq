@@ -1,0 +1,7 @@
+{
+  "id": "hello-fish",
+  "name": "示例：接话插件",
+  "version": "1.0.0",
+  "description": "消息里出现「摸鱼」就调侃一句（演示插件 API）",
+  "permissions": ["read_context", "send_message"]
+}
