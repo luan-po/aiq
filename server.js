@@ -84,7 +84,7 @@ const server = http.createServer(async (req, res) => {
       if (!u) return json(res, 401, { error: 'token 无效' });
       const gid = url.searchParams.get('groupId');
       const since = Number(url.searchParams.get('since') || 0);
-      const msgs = store.history(gid, since).map(m => ({ seq: m.seq, from: m.sender_id, kind: m.kind, text: m.text, ts: m.ts }));
+      const msgs = store.history(gid, since).map(m => ({ seq: m.seq, from: m.sender_id, name: m.sender_name, kind: m.kind, text: m.text, ts: m.ts }));
       return json(res, 200, { messages: msgs, lastSeq: store.lastSeq(gid) });
     }
 
