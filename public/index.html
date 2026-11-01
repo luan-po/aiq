@@ -37,6 +37,8 @@
   #emptyGroups { color:var(--dim); font-size:11px; padding:8px 10px; }
   #newGroup { display:none; gap:8px; padding:12px 10px 14px; background:var(--surface); }
   #newGroup input { flex:1; min-width:0; }
+  #joinRow { display:none; gap:8px; padding:0 10px 14px; background:var(--surface); }
+  #joinRow input { flex:1; min-width:0; text-transform:uppercase; }
   #aiHint { color:var(--dim); font-size:11px; line-height:1.7; padding:2px 2px 0; }
 
   /* 中部 */
@@ -108,6 +110,10 @@
   <div id="newGroup">
     <input id="groupName" placeholder="新群名">
     <button id="createGroup">建</button>
+  </div>
+  <div id="joinRow">
+    <input id="invite" placeholder="邀请码">
+    <button id="joinBtn" class="flat">加入</button>
   </div>
 </div>
 
@@ -188,6 +194,7 @@ async function enter() {
   me = u; localStorage.setItem('aiq_token', u.token);
   $('#login').style.display = 'none';
   $('#newGroup').style.display = 'flex';
+  $('#joinRow').style.display = 'flex';
   await loadGroups(); await loadCfg(); connect();
 }
 
@@ -210,7 +217,8 @@ async function loadGroups() {
   list.forEach(g => {
     const el = document.createElement('div');
     el.className = 'g' + (current === g.id ? ' active' : '');
-    el.innerHTML = `<div class="name">${esc(g.name)}</div><div class="meta">${g.members} 人</div>`;
+    const meta = g.invite ? `${g.members} 人 · 邀请码 ${g.invite}` : `${g.members} 人`;
+    el.innerHTML = `<div class="name">${esc(g.name)}</div><div class="meta">${esc(meta)}</div>`;
     el.onclick = () => openGroup(g.id, g.name);
     box.appendChild(el);
   });
@@ -233,7 +241,6 @@ async function openGroup(id, name) {
   $('#head').innerHTML = `<b>${esc(name)}</b><span></span>`;
   $('#msgs').innerHTML = '';
   $('#compose').style.display = 'flex';
-  await api('/api/join', { token: me.token, groupId: id });
   ws.send(JSON.stringify({ type:'join', groupId: id }));
   await pullHistory(); loadGroups();
 }
@@ -349,6 +356,15 @@ $('#createGroup').onclick = async () => {
   const r = await api('/api/groups', { token: me.token, name });
   if (r.error) return alert('建群失败：' + r.error);
   $('#groupName').value = '';
+  await loadGroups();
+  if (r.group) await openGroup(r.group.id, r.group.name);
+};
+$('#joinBtn').onclick = async () => {
+  const invite = $('#invite').value.trim().toUpperCase();
+  if (!invite) return;
+  const r = await api('/api/join', { token: me.token, invite });
+  if (r.error) return alert(r.error);
+  $('#invite').value = '';
   await loadGroups();
   if (r.group) await openGroup(r.group.id, r.group.name);
 };
