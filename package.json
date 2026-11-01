@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "自托管聊天 + 内置 AI 的 MVP",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luan-po/aiq.git"
+  },
   "main": "electron/main.js",
   "scripts": {
     "start": "node server.js",
