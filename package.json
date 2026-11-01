@@ -1,0 +1,46 @@
+{
+  "name": "aiq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "自托管聊天 + 内置 AI 的 MVP",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "electron .",
+    "test": "node test.js",
+    "build": "electron-builder --win"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "app.aiq.desktop",
+    "productName": "AIQ",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "server.js",
+      "storage.js",
+      "plugins.js",
+      "public/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}
