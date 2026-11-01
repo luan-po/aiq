@@ -71,6 +71,7 @@ const q = {
   insertGroup: db.prepare('INSERT INTO groups (id,name,owner_id,invite,last_seq,created) VALUES (?,?,?,?,0,?)'),
   group: db.prepare('SELECT * FROM groups WHERE id = ?'),
   groupByInvite: db.prepare('SELECT * FROM groups WHERE invite = ?'),
+  setInvite: db.prepare('UPDATE groups SET invite = ? WHERE id = ?'),
   allGroups: db.prepare('SELECT g.*, (SELECT COUNT(*) FROM members m WHERE m.group_id=g.id) AS members FROM groups g ORDER BY created DESC'),
   myGroups: db.prepare(`SELECT g.*, (SELECT COUNT(*) FROM members m2 WHERE m2.group_id=g.id) AS members
     FROM groups g JOIN members m ON m.group_id = g.id AND m.user_id = ?
@@ -110,6 +111,7 @@ module.exports = {
   myGroups(userId) { return q.myGroups.all(userId); },
   getGroup(id) { return q.group.get(id) || null; },
   groupByInvite(code) { return q.groupByInvite.get(String(code || '').toUpperCase()) || null; },
+  setGroupInvite(id, invite) { q.setInvite.run(invite, id); },
   joinGroup(groupId, userId) { q.addMember.run(groupId, userId, Date.now()); },
   isMember(groupId, userId) { return !!q.isMember.get(groupId, userId); },
 
