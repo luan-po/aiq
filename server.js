@@ -74,14 +74,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/groups') {
       const u = store.userByToken(url.searchParams.get('token'));
       if (!u) return json(res, 401, { error: 'token 无效' });
-      // 只返回自己加入过的群；自己建的群带上邀请码
-      return json(res, 200, {
-        groups: store.myGroups(u.id).map(g => ({
+      const mine = store.myGroups(u.id).map(g => {
+        // 老群没有邀请码的，主人一看就补一个
+        if (!g.invite && g.owner_id === u.id) {
+          g.invite = newInvite();
+          store.setGroupInvite(g.id, g.invite);
+        }
+        return {
           id: g.id, name: g.name, members: g.members, lastSeq: g.last_seq,
           invite: g.owner_id === u.id ? g.invite : undefined,
           owner: g.owner_id === u.id,
-        })),
+        };
       });
+      return json(res, 200, { groups: mine });
     }
 
     if (req.method === 'POST' && p === '/api/groups') {
