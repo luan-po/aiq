@@ -10,7 +10,22 @@ const plugins = require('./plugins');
 
 const PORT = Number(process.env.PORT || 8090);
 const BOT_URL = process.env.BOT_URL || '';
-const BOT_TOKEN = process.env.BOT_TOKEN || 'bot-local-token';
+const DATA_DIR = process.env.AIQ_DATA_DIR || path.join(__dirname, 'data');
+
+// 机器人 token 不再写死默认值：没配就随机生成一份存本地
+function loadBotToken() {
+  if (process.env.BOT_TOKEN) return process.env.BOT_TOKEN;
+  const f = path.join(DATA_DIR, 'bot-token.txt');
+  try { const t = fs.readFileSync(f, 'utf8').trim(); if (t) return t; } catch {}
+  const t = crypto.randomBytes(24).toString('hex');
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(f, t, { mode: 0o600 }); } catch {}
+  console.log('[aiq] 已生成机器人 token:', f);
+  return t;
+}
+const BOT_TOKEN = loadBotToken();
+
+// 群邀请码（6 位大写）
+const newInvite = () => crypto.randomBytes(3).toString('hex').toUpperCase();
 
 const rid = (n = 8) => crypto.randomBytes(n).toString('hex');
 
@@ -37,7 +52,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
       const file = path.join(__dirname, 'public', 'index.html');
       if (!fs.existsSync(file)) return json(res, 404, { error: 'no client' });
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, must-revalidate' });
       return res.end(fs.readFileSync(file));
     }
 
@@ -59,22 +74,36 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/groups') {
       const u = store.userByToken(url.searchParams.get('token'));
       if (!u) return json(res, 401, { error: 'token 无效' });
-      return json(res, 200, { groups: store.listGroups().map(g => ({ id: g.id, name: g.name, members: g.members, lastSeq: g.last_seq })) });
+      // 只返回自己加入过的群；自己建的群带上邀请码
+      return json(res, 200, {
+        groups: store.myGroups(u.id).map(g => ({
+          id: g.id, name: g.name, members: g.members, lastSeq: g.last_seq,
+          invite: g.owner_id === u.id ? g.invite : undefined,
+          owner: g.owner_id === u.id,
+        })),
+      });
     }
 
     if (req.method === 'POST' && p === '/api/groups') {
       const b = await readBody(req);
       const u = store.userByToken(b.token);
       if (!u) return json(res, 401, { error: 'token 无效' });
-      const g = store.createGroup({ id: 'g_' + rid(6), name: String(b.name || '新群').slice(0, 30), ownerId: u.id });
-      return json(res, 200, { group: { id: g.id, name: g.name } });
+      const g = store.createGroup({
+        id: 'g_' + rid(6),
+        name: String(b.name || '新群').slice(0, 30),
+        ownerId: u.id,
+        invite: newInvite(),
+      });
+      return json(res, 200, { group: { id: g.id, name: g.name, invite: g.invite } });
     }
 
     if (req.method === 'POST' && p === '/api/join') {
       const b = await readBody(req);
       const u = store.userByToken(b.token);
-      const g = store.getGroup(b.groupId);
-      if (!u || !g) return json(res, 400, { error: '群或用户不存在' });
+      if (!u) return json(res, 401, { error: 'token 无效' });
+      // 加群必须凭邀请码
+      const g = store.groupByInvite(b.invite);
+      if (!g) return json(res, 400, { error: '邀请码不对' });
       store.joinGroup(g.id, u.id);
       return json(res, 200, { ok: true, group: { id: g.id, name: g.name } });
     }
@@ -83,6 +112,8 @@ const server = http.createServer(async (req, res) => {
       const u = store.userByToken(url.searchParams.get('token'));
       if (!u) return json(res, 401, { error: 'token 无效' });
       const gid = url.searchParams.get('groupId');
+      if (!store.getGroup(gid)) return json(res, 404, { error: '群不存在' });
+      if (!store.isMember(gid, u.id)) return json(res, 403, { error: '你不在这个群里' });
       const since = Number(url.searchParams.get('since') || 0);
       const msgs = store.history(gid, since).map(m => ({ seq: m.seq, from: m.sender_id, name: m.sender_name, kind: m.kind, text: m.text, ts: m.ts }));
       return json(res, 200, { messages: msgs, lastSeq: store.lastSeq(gid) });
@@ -92,6 +123,7 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const u = store.userByToken(b.token);
       if (!u) return json(res, 401, { error: 'token 无效' });
+      if (!store.isMember(b.groupId, u.id)) return json(res, 403, { error: '你不在这个群里' });
       const m = store.appendMessage(b.groupId, u.id, b.text);
       if (!m) return json(res, 400, { error: '群不存在' });
       const msg = { seq: m.seq, from: m.sender_id, kind: m.kind, text: m.text, ts: m.ts };
@@ -111,11 +143,11 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { message: msg });
     }
 
-    // ---------- 设置（BYOK：用户自己的 key 存在本机） ----------
+    // ---------- 设置（BYOK：每个用户自己的 key，互不影响） ----------
     if (req.method === 'GET' && p === '/api/settings') {
       const u = store.userByToken(url.searchParams.get('token'));
       if (!u) return json(res, 401, { error: 'token 无效' });
-      const s = store.getSetting('ai', '{}');
+      const s = store.getUserSetting(u.id, 'ai', '{}');
       const obj = JSON.parse(s || '{}');
       return json(res, 200, {
         baseUrl: obj.baseUrl || 'https://api.deepseek.com/v1',
@@ -128,13 +160,13 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const u = store.userByToken(b.token);
       if (!u) return json(res, 401, { error: 'token 无效' });
-      const cur = JSON.parse(store.getSetting('ai', '{}') || '{}');
+      const cur = JSON.parse(store.getUserSetting(u.id, 'ai', '{}') || '{}');
       const next = {
         baseUrl: b.baseUrl || cur.baseUrl || 'https://api.deepseek.com/v1',
         model: b.model || cur.model || 'deepseek-chat',
         apiKey: b.apiKey || cur.apiKey || '',
       };
-      store.setSetting('ai', JSON.stringify(next));
+      store.setUserSetting(u.id, 'ai', JSON.stringify(next));
       return json(res, 200, { ok: true, baseUrl: next.baseUrl, model: next.model, hasKey: !!next.apiKey });
     }
 
@@ -143,8 +175,9 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const u = store.userByToken(b.token);
       if (!u) return json(res, 401, { error: 'token 无效' });
-      const cfg = JSON.parse(store.getSetting('ai', '{}') || '{}');
+      const cfg = JSON.parse(store.getUserSetting(u.id, 'ai', '{}') || '{}');
       if (!cfg.apiKey) return json(res, 400, { error: '还没填 API Key' });
+      if (!store.isMember(b.groupId, u.id)) return json(res, 403, { error: '你不在这个群里' });
 
       const last = Number(b.lastSeq || 0) || 999999;
       let ctxLines;
@@ -209,17 +242,19 @@ const server = http.createServer(async (req, res) => {
       if (!u) return json(res, 401, { error: 'token 无效' });
       const g = store.getGroup(b.groupId);
       if (!g) return json(res, 400, { error: '群不存在' });
+      if (!store.isMember(g.id, u.id)) return json(res, 403, { error: '你不在这个群里' });
 
       const msgs = store.history(b.groupId, 0).slice(-30);
       const ctxLines = msgs.map(m => {
-        const who = m.kind === 'bot' ? 'AI 助手' : (m.sender_id === u.id ? u.name : m.sender_id);
+        const who = m.kind === 'bot' ? 'AI 助手' : (m.sender_name || m.sender_id);
         return `${who}: ${m.text}`;
       }).join('\n');
 
       try {
         const text = await callLLM(
           `最近的群聊记录：\n${ctxLines || '（空）'}\n\n现在的请求：${b.prompt}`,
-          '你在一个聊天群里。回答要短、口语化，不要客服腔，不要复述聊天记录。'
+          '你在一个聊天群里。回答要短、口语化，不要客服腔，不要复述聊天记录。',
+          u.id
         );
         const m = store.appendMessage(b.groupId, 'ai-assistant', text, 'bot');
         const msg = { seq: m.seq, from: m.sender_id, kind: m.kind, text: m.text, ts: m.ts };
@@ -253,13 +288,14 @@ wss.on('connection', (ws, req) => {
     if (m.type === 'join') {
       const g = store.getGroup(m.groupId);
       if (!g) return ws.send(JSON.stringify({ type: 'error', text: '群不存在' }));
-      store.joinGroup(g.id, user.id);
+      if (!store.isMember(g.id, user.id)) return ws.send(JSON.stringify({ type: 'error', text: '你不在这个群里' }));
       ws.groups.add(g.id);
       if (!rooms.has(g.id)) rooms.set(g.id, new Set());
       rooms.get(g.id).add(ws);
       ws.send(JSON.stringify({ type: 'joined', groupId: g.id, lastSeq: g.last_seq }));
     }
     if (m.type === 'send') {
+      if (!store.isMember(m.groupId, user.id)) return ws.send(JSON.stringify({ type: 'error', text: '你不在这个群里' }));
       const mm = store.appendMessage(m.groupId, user.id, m.text);
       if (!mm) return;
       const msg = { seq: mm.seq, from: mm.sender_id, kind: mm.kind, text: mm.text, ts: mm.ts };
@@ -294,8 +330,8 @@ function hookBot(groupId, fromName, text) {
 }
 
 // ---------- 插件派发 ----------
-async function callLLM(promptText, systemText) {
-  const cfg = JSON.parse(store.getSetting('ai', '{}') || '{}');
+async function callLLM(promptText, systemText, userId) {
+  const cfg = JSON.parse((userId ? store.getUserSetting(userId, 'ai', '{}') : store.getSetting('ai', '{}')) || '{}');
   if (!cfg.apiKey) throw new Error('还没填 API Key');
   const r = await fetch(`${(cfg.baseUrl || 'https://api.deepseek.com/v1').replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
