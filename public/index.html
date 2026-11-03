@@ -154,6 +154,7 @@
     <h2>进 AIQ</h2>
     <input id="name" placeholder="你的名字">
     <input id="server" placeholder="服务器地址（留空=本机）">
+    <input id="signupCode" placeholder="注册口令" style="display:none">
     <button id="go">进去</button>
     <div class="hint" id="lanHint"></div>
   </div>
@@ -189,7 +190,10 @@ async function enter() {
 
   const saved = localStorage.getItem('aiq_token');
   let u = saved ? await api('/api/login', { token: saved }) : null;
-  if (!u || u.error) u = await api('/api/register', { name });
+  if (!u || u.error) {
+    const code = $('#signupCode') ? $('#signupCode').value.trim() : '';
+    u = await api('/api/register', { name, code });
+  }
   if (u.error) { alert(u.error); return; }
   me = u; localStorage.setItem('aiq_token', u.token);
   $('#login').style.display = 'none';
@@ -208,6 +212,14 @@ async function showLan() {
 }
 showLan();
 $('#server').value = localStorage.getItem('aiq_server') || '';
+
+// 服务器要求注册口令时，把输入框放出来
+(async () => {
+  try {
+    const c = await api('/api/config');
+    if (c.signupRequired) $('#signupCode').style.display = 'block';
+  } catch {}
+})();
 
 async function loadGroups() {
   const r = await api(`/api/groups?token=${me.token}`);
