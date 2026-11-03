@@ -11,6 +11,8 @@ const plugins = require('./plugins');
 const PORT = Number(process.env.PORT || 8090);
 const BOT_URL = process.env.BOT_URL || '';
 const DATA_DIR = process.env.AIQ_DATA_DIR || path.join(__dirname, 'data');
+// 公网部署时设上这个：注册要凭口令，不然谁拿到地址都能在你机器上建号建群
+const SIGNUP_CODE = process.env.AIQ_SIGNUP_CODE || '';
 
 // 机器人 token 不再写死默认值：没配就随机生成一份存本地
 function loadBotToken() {
@@ -56,8 +58,16 @@ const server = http.createServer(async (req, res) => {
       return res.end(fs.readFileSync(file));
     }
 
+    if (req.method === 'GET' && p === '/api/config') {
+      return json(res, 200, { signupRequired: !!SIGNUP_CODE });
+    }
+
     if (req.method === 'POST' && p === '/api/register') {
       const b = await readBody(req);
+      // 公开到公网时，注册要凭口令，不然谁拿到地址都能在你服务器上建号建群
+      if (SIGNUP_CODE && String(b.code || '') !== SIGNUP_CODE) {
+        return json(res, 403, { error: '需要注册口令' });
+      }
       if (!b.name) return json(res, 400, { error: '名字呢' });
       const user = { id: 'u_' + rid(6), name: String(b.name).slice(0, 24), token: rid(16), created: Date.now() };
       store.saveUser(user);
